@@ -38,14 +38,24 @@ export const CALLBACK_PORT = 14561;
 // Testados e confirmados funcionando via token OAuth
 export const QWEN_MODELS = {
   // --- Coding Models ---
+  'qwen3.5-plus': {
+    id: 'qwen3.5-plus',
+    name: 'Qwen 3.5 Plus',
+    contextWindow: 1048576, // 1M tokens
+    maxOutput: 65536, // 64K tokens
+    description: 'Latest and most capable Qwen 3.5 coding model with 1M context window',
+    reasoning: true,
+    capabilities: { vision: true },
+    cost: { input: 0, output: 0 }, // Free via OAuth
+  },
   'qwen3-coder-plus': {
     id: 'qwen3-coder-plus',
     name: 'Qwen3 Coder Plus',
     contextWindow: 1048576, // 1M tokens
     maxOutput: 65536, // 64K tokens
-    description: 'Most capable Qwen coding model with 1M context window',
+    description: 'Most capable Qwen 3.0 coding model with 1M context window',
     reasoning: false,
-    cost: { input: 0, output: 0 }, // Free via OAuth
+    cost: { input: 0, output: 0 },
   },
   'qwen3-coder-flash': {
     id: 'qwen3-coder-flash',
@@ -62,8 +72,9 @@ export const QWEN_MODELS = {
     name: 'Qwen Coder (auto)',
     contextWindow: 1048576,
     maxOutput: 65536,
-    description: 'Auto-routed coding model (maps to qwen3-coder-plus)',
+    description: 'Auto-routed coding model (Maps to Qwen 3.5 Plus - Hybrid & Vision)',
     reasoning: false,
+    capabilities: { vision: true },
     cost: { input: 0, output: 0 },
   },
   // --- Vision Model ---
@@ -76,4 +87,12 @@ export const QWEN_MODELS = {
     reasoning: false,
     cost: { input: 0, output: 0 },
   },
+} as const;
+
+// Official Qwen Code CLI Headers for performance and quota recognition
+export const QWEN_OFFICIAL_HEADERS = {
+  'X-DashScope-CacheControl': 'enable',
+  'X-DashScope-AuthType': 'qwen-oauth',
+  'X-DashScope-UserAgent': 'QwenCode/0.12.0 (Linux; x64)',
+  'User-Agent': 'QwenCode/0.12.0 (Linux; x64)'
 } as const;

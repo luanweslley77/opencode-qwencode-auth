@@ -10,9 +10,9 @@
 
 import { spawn } from 'node:child_process';
 
-import { QWEN_PROVIDER_ID, QWEN_API_CONFIG, QWEN_MODELS } from './constants.js';
+import { QWEN_PROVIDER_ID, QWEN_API_CONFIG, QWEN_MODELS, QWEN_OFFICIAL_HEADERS } from './constants.js';
 import type { QwenCredentials } from './types.js';
-import { saveCredentials } from './plugin/auth.js';
+import { saveCredentials, loadCredentials, resolveBaseUrl } from './plugin/auth.js';
 import {
   generatePKCE,
   requestDeviceAuthorization,
@@ -22,6 +22,9 @@ import {
   SlowDownError,
 } from './qwen/oauth.js';
 import { logTechnicalDetail } from './errors.js';
+
+// Global session ID for the plugin lifetime
+const PLUGIN_SESSION_ID = crypto.randomUUID();
 
 // ============================================
 // Helpers
@@ -90,9 +93,22 @@ export const QwenAuthPlugin = async (_input: unknown) => {
         const accessToken = await getValidAccessToken(getAuth);
         if (!accessToken) return null;
 
+        // Load credentials to resolve region-specific base URL
+        const creds = loadCredentials();
+        const baseURL = resolveBaseUrl(creds?.resource_url);
+
         return {
           apiKey: accessToken,
-          baseURL: QWEN_API_CONFIG.baseUrl,
+          baseURL: baseURL,
+          headers: {
+            ...QWEN_OFFICIAL_HEADERS,
+            // Custom metadata object required by official backend for free quota
+            'X-Metadata': JSON.stringify({
+              sessionId: PLUGIN_SESSION_ID,
+              promptId: crypto.randomUUID(),
+              source: 'opencode-qwencode-auth'
+            })
+          }
         };
       },
 
@@ -167,19 +183,28 @@ export const QwenAuthPlugin = async (_input: unknown) => {
       providers[QWEN_PROVIDER_ID] = {
         npm: '@ai-sdk/openai-compatible',
         name: 'Qwen Code',
-        options: { baseURL: QWEN_API_CONFIG.baseUrl },
+        options: { 
+          baseURL: QWEN_API_CONFIG.baseUrl,
+          headers: QWEN_OFFICIAL_HEADERS
+        },
         models: Object.fromEntries(
-          Object.entries(QWEN_MODELS).map(([id, m]) => [
-            id,
-            {
-              id: m.id,
-              name: m.name,
-              reasoning: m.reasoning,
-              limit: { context: m.contextWindow, output: m.maxOutput },
-              cost: m.cost,
-              modalities: { input: ['text'], output: ['text'] },
-            },
-          ])
+          Object.entries(QWEN_MODELS).map(([id, m]) => {
+            const hasVision = 'capabilities' in m && m.capabilities?.vision;
+            return [
+              id,
+              {
+                id: m.id,
+                name: m.name,
+                reasoning: m.reasoning,
+                limit: { context: m.contextWindow, output: m.maxOutput },
+                cost: m.cost,
+                modalities: { 
+                  input: hasVision ? ['text', 'image'] : ['text'], 
+                  output: ['text'] 
+                },
+              },
+            ];
+          })
         ),
       };
 

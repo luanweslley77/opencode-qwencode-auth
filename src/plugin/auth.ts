@@ -6,9 +6,10 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 
 import type { QwenCredentials } from '../types.js';
+import { QWEN_API_CONFIG } from '../constants.js';
 
 /**
  * Get the path to the credentials file
@@ -16,6 +17,45 @@ import type { QwenCredentials } from '../types.js';
 export function getCredentialsPath(): string {
   const homeDir = homedir();
   return join(homeDir, '.qwen', 'oauth_creds.json');
+}
+
+/**
+ * Load credentials from file
+ */
+export function loadCredentials(): any {
+  const credPath = getCredentialsPath();
+  if (!existsSync(credPath)) {
+    return null;
+  }
+
+  try {
+    const content = readFileSync(credPath, 'utf8');
+    return JSON.parse(content);
+  } catch (error) {
+    console.error('Failed to load Qwen credentials:', error);
+    return null;
+  }
+}
+
+/**
+ * Resolve the API base URL based on the token region
+ */
+export function resolveBaseUrl(resourceUrl?: string): string {
+  if (!resourceUrl) return QWEN_API_CONFIG.portalBaseUrl;
+
+  if (resourceUrl.includes('portal.qwen.ai')) {
+    return QWEN_API_CONFIG.portalBaseUrl;
+  }
+
+  if (resourceUrl.includes('dashscope')) {
+    // Both dashscope and dashscope-intl use similar URL patterns
+    if (resourceUrl.includes('dashscope-intl')) {
+      return 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+    }
+    return QWEN_API_CONFIG.defaultBaseUrl;
+  }
+
+  return QWEN_API_CONFIG.portalBaseUrl;
 }
 
 /**
