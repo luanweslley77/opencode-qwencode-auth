@@ -20,9 +20,9 @@ export function getCredentialsPath(): string {
 }
 
 /**
- * Load credentials from file
+ * Load credentials from file and map to camelCase QwenCredentials
  */
-export function loadCredentials(): any {
+export function loadCredentials(): QwenCredentials | null {
   const credPath = getCredentialsPath();
   if (!existsSync(credPath)) {
     return null;
@@ -30,7 +30,16 @@ export function loadCredentials(): any {
 
   try {
     const content = readFileSync(credPath, 'utf8');
-    return JSON.parse(content);
+    const data = JSON.parse(content);
+    
+    return {
+      accessToken: data.access_token,
+      tokenType: data.token_type,
+      refreshToken: data.refresh_token,
+      resourceUrl: data.resource_url,
+      expiryDate: data.expiry_date,
+      scope: data.scope,
+    };
   } catch (error) {
     console.error('Failed to load Qwen credentials:', error);
     return null;

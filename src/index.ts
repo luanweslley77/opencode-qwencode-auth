@@ -9,25 +9,27 @@
  */
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import { QWEN_PROVIDER_ID, QWEN_API_CONFIG, QWEN_MODELS, QWEN_OFFICIAL_HEADERS } from './constants.js';
 import type { QwenCredentials } from './types.js';
-import type { HttpError } from './utils/retry.js';
-import { saveCredentials, loadCredentials, resolveBaseUrl } from './plugin/auth.js';
+import { resolveBaseUrl } from './plugin/auth.js';
 import {
   generatePKCE,
   requestDeviceAuthorization,
   pollDeviceToken,
   tokenResponseToCredentials,
-  refreshAccessToken,
   SlowDownError,
 } from './qwen/oauth.js';
-import { logTechnicalDetail } from './errors.js';
-import { retryWithBackoff } from './utils/retry.js';
+import { retryWithBackoff, getErrorStatus } from './utils/retry.js';
 import { RequestQueue } from './plugin/request-queue.js';
+import { tokenManager } from './plugin/token-manager.js';
+import { createDebugLogger } from './utils/debug-logger.js';
+
+const debugLogger = createDebugLogger('PLUGIN');
 
 // Global session ID for the plugin lifetime
-const PLUGIN_SESSION_ID = crypto.randomUUID();
+const PLUGIN_SESSION_ID = randomUUID();
 
 // Singleton request queue for throttling (shared across all requests)
 const requestQueue = new RequestQueue();
@@ -86,7 +88,7 @@ export const QwenAuthPlugin = async (_input: unknown) => {
       provider: QWEN_PROVIDER_ID,
 
       loader: async (
-        getAuth: () => Promise<{ type: string; access?: string; refresh?: string; expires?: number }>,
+        getAuth: any,
         provider: { models?: Record<string, { cost?: { input: number; output: number } }> },
       ) => {
         // Zerar custo dos modelos (gratuito via OAuth)
@@ -96,52 +98,68 @@ export const QwenAuthPlugin = async (_input: unknown) => {
           }
         }
 
-        const accessToken = await getValidAccessToken(getAuth);
-        if (!accessToken) return null;
+        // Get latest valid credentials
+        const credentials = await tokenManager.getValidCredentials();
+        if (!credentials?.accessToken) return null;
 
-        // Load credentials to resolve region-specific base URL
-        const creds = loadCredentials();
-        const baseURL = resolveBaseUrl(creds?.resource_url);
+        const baseURL = resolveBaseUrl(credentials.resourceUrl);
 
         return {
-          apiKey: accessToken,
+          apiKey: credentials.accessToken,
           baseURL: baseURL,
           headers: {
             ...QWEN_OFFICIAL_HEADERS,
-            // Custom metadata object required by official backend for free quota
             'X-Metadata': JSON.stringify({
               sessionId: PLUGIN_SESSION_ID,
-              promptId: crypto.randomUUID(),
+              promptId: randomUUID(),
               source: 'opencode-qwencode-auth'
             })
           },
-          // Custom fetch with throttling and retry
-          fetch: async (url: string, options?: RequestInit) => {
+          // Custom fetch with throttling, retry and 401 recovery
+          fetch: async (url: string, options: any = {}) => {
             return requestQueue.enqueue(async () => {
+              let retryCount401 = 0;
+
               return retryWithBackoff(
                 async () => {
-                  // Generate new promptId for each request
-                  const headers = new Headers(options?.headers);
-                  headers.set('Authorization', `Bearer ${accessToken}`);
-                  headers.set(
-                    'X-Metadata',
-                    JSON.stringify({
+                  // Always get latest token (it might have been refreshed)
+                  const currentCreds = await tokenManager.getValidCredentials();
+                  const token = currentCreds?.accessToken;
+                  
+                  if (!token) throw new Error('No access token available');
+
+                  // Prepare headers
+                  const headers: Record<string, string> = {
+                    ...QWEN_OFFICIAL_HEADERS,
+                    ...(options.headers || {}),
+                    'Authorization': `Bearer ${token}`,
+                    'X-Metadata': JSON.stringify({
                       sessionId: PLUGIN_SESSION_ID,
-                      promptId: crypto.randomUUID(),
-                      source: 'opencode-qwencode-auth',
+                      promptId: randomUUID(),
+                      source: 'opencode-qwencode-auth'
                     })
-                  );
+                  };
 
                   const response = await fetch(url, {
                     ...options,
-                    headers,
+                    headers
                   });
+
+                  // Handle 401: Force refresh once
+                  if (response.status === 401 && retryCount401 < 1) {
+                    retryCount401++;
+                    debugLogger.warn('401 Unauthorized detected. Forcing token refresh...');
+                    await tokenManager.getValidCredentials(true);
+                    
+                    const error: any = new Error('Unauthorized - retrying after refresh');
+                    error.status = 401;
+                    throw error;
+                  }
 
                   if (!response.ok) {
                     const errorText = await response.text().catch(() => '');
-                    const error = new Error(`HTTP ${response.status}: ${errorText}`) as HttpError & { status?: number };
+                    const error: any = new Error(`HTTP ${response.status}: ${errorText}`);
                     error.status = response.status;
-                    (error as any).response = response;
                     throw error;
                   }
 
@@ -150,12 +168,15 @@ export const QwenAuthPlugin = async (_input: unknown) => {
                 {
                   authType: 'qwen-oauth',
                   maxAttempts: 7,
-                  initialDelayMs: 1500,
-                  maxDelayMs: 30000,
+                  shouldRetryOnError: (error: any) => {
+                    const status = error.status || getErrorStatus(error);
+                    // Retry on 401 (if within limit), 429 (rate limit), and 5xx (server errors)
+                    return status === 401 || status === 429 || (status !== undefined && status >= 500 && status < 600);
+                  }
                 }
               );
             });
-          },
+          }
         };
       },
 
@@ -189,7 +210,7 @@ export const QwenAuthPlugin = async (_input: unknown) => {
 
                       if (tokenResponse) {
                         const credentials = tokenResponseToCredentials(tokenResponse);
-                        saveCredentials(credentials);
+                        tokenManager.setCredentials(credentials);
 
                         return {
                           type: 'success' as const,
