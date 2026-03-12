@@ -21,7 +21,57 @@ export function getCredentialsPath(): string {
 }
 
 /**
+ * Validate credentials structure
+ * Matches official client's validateCredentials() function
+ */
+function validateCredentials(data: unknown): QwenCredentials {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid credentials format: expected object');
+  }
+
+  const creds = data as Partial<QwenCredentials>;
+  const requiredFields = ['accessToken', 'tokenType'] as const;
+
+  // Validate required string fields
+  for (const field of requiredFields) {
+    if (!creds[field] || typeof creds[field] !== 'string') {
+      throw new Error(`Invalid credentials: missing or invalid ${field}`);
+    }
+  }
+
+  // Validate refreshToken (optional but should be string if present)
+  if (creds.refreshToken !== undefined && typeof creds.refreshToken !== 'string') {
+    throw new Error('Invalid credentials: refreshToken must be a string');
+  }
+
+  // Validate expiryDate (required for token management)
+  if (!creds.expiryDate || typeof creds.expiryDate !== 'number') {
+    throw new Error('Invalid credentials: missing or invalid expiryDate');
+  }
+
+  // Validate resourceUrl (optional but should be string if present)
+  if (creds.resourceUrl !== undefined && typeof creds.resourceUrl !== 'string') {
+    throw new Error('Invalid credentials: resourceUrl must be a string');
+  }
+
+  // Validate scope (optional but should be string if present)
+  if (creds.scope !== undefined && typeof creds.scope !== 'string') {
+    throw new Error('Invalid credentials: scope must be a string');
+  }
+
+  return {
+    accessToken: creds.accessToken!,
+    tokenType: creds.tokenType!,
+    refreshToken: creds.refreshToken,
+    resourceUrl: creds.resourceUrl,
+    expiryDate: creds.expiryDate!,
+    scope: creds.scope,
+  };
+}
+
+/**
  * Load credentials from file and map to camelCase QwenCredentials
+ * Includes comprehensive validation matching official client
  */
 export function loadCredentials(): QwenCredentials | null {
   const credPath = getCredentialsPath();
@@ -33,21 +83,16 @@ export function loadCredentials(): QwenCredentials | null {
     const content = readFileSync(credPath, 'utf8');
     const data = JSON.parse(content);
     
-    if (!data.access_token) {
-      console.warn('[QwenAuth] No access_token found in credentials file');
-      return null;
-    }
-
-    return {
-      accessToken: data.access_token,
-      tokenType: data.token_type || 'Bearer',
-      refreshToken: data.refresh_token,
-      resourceUrl: data.resource_url,
-      expiryDate: data.expiry_date,
-      scope: data.scope,
-    };
+    // Validate credentials structure (matches official client's validation)
+    const validated = validateCredentials(data);
+    
+    return validated;
   } catch (error) {
-    console.error('[QwenAuth] Failed to load credentials:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[QwenAuth] Failed to load credentials:', message);
+    
+    // Corrupted file - suggest re-authentication
+    console.error('[QwenAuth] Credentials file may be corrupted. Please re-authenticate.');
     return null;
   }
 }

@@ -19,10 +19,12 @@ import { FileLock } from '../utils/file-lock.js';
 
 const debugLogger = createDebugLogger('TOKEN_MANAGER');
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000; // 30 seconds
+const CACHE_CHECK_INTERVAL_MS = 5000; // 5 seconds (matches official client)
 
 class TokenManager {
   private memoryCache: QwenCredentials | null = null;
   private refreshPromise: Promise<QwenCredentials | null> | null = null;
+  private lastFileCheck = 0;
 
   /**
    * Get valid credentials, refreshing if necessary
@@ -55,16 +57,34 @@ class TokenManager {
       // 3. Need to perform refresh or reload from file
       this.refreshPromise = (async () => {
         const refreshStart = Date.now();
+        const now = Date.now();
         
-        // Always check file first (may have been updated by another process)
-        const fromFile = loadCredentials();
+        // Throttle file checks to avoid excessive I/O (matches official client)
+        const shouldCheckFile = forceRefresh || (now - this.lastFileCheck) >= CACHE_CHECK_INTERVAL_MS;
         
-        debugLogger.info('File check', {
-          hasFile: !!fromFile,
-          fileValid: fromFile ? this.isTokenValid(fromFile) : 'N/A',
-          forceRefresh,
-          age: Date.now() - refreshStart
-        });
+        let fromFile: QwenCredentials | null = null;
+        
+        if (shouldCheckFile) {
+          // Always check file first (may have been updated by another process)
+          fromFile = loadCredentials();
+          this.lastFileCheck = now;
+          
+          debugLogger.info('File check (throttled)', {
+            hasFile: !!fromFile,
+            fileValid: fromFile ? this.isTokenValid(fromFile) : 'N/A',
+            forceRefresh,
+            timeSinceLastCheck: now - this.lastFileCheck,
+            throttleInterval: CACHE_CHECK_INTERVAL_MS
+          });
+        } else {
+          debugLogger.debug('Skipping file check (throttled)', {
+            timeSinceLastCheck: now - this.lastFileCheck,
+            throttleInterval: CACHE_CHECK_INTERVAL_MS
+          });
+          
+          // Use memory cache if available
+          fromFile = this.memoryCache;
+        }
 
         // If not forcing refresh and file has valid credentials, use them
         if (!forceRefresh && fromFile && this.isTokenValid(fromFile)) {
