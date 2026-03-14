@@ -15,18 +15,18 @@ import {
   refreshAccessToken,
   isCredentialsExpired,
   SlowDownError,
-} from '../src/qwen/oauth.js';
+} from '../../src/qwen/oauth.js';
 import {
   loadCredentials,
   saveCredentials,
   resolveBaseUrl,
   getCredentialsPath,
-} from '../src/plugin/auth.js';
-import { QWEN_API_CONFIG, QWEN_OAUTH_CONFIG, QWEN_OFFICIAL_HEADERS } from '../src/constants.js';
-import { retryWithBackoff, getErrorStatus } from '../src/utils/retry.js';
-import { RequestQueue } from '../src/plugin/request-queue.js';
-import { tokenManager } from '../src/plugin/token-manager.js';
-import type { QwenCredentials } from '../src/types.js';
+} from '../../src/plugin/auth.js';
+import { QWEN_API_CONFIG, QWEN_OAUTH_CONFIG, QWEN_OFFICIAL_HEADERS } from '../../src/constants.js';
+import { retryWithBackoff, getErrorStatus } from '../../src/utils/retry.js';
+import { RequestQueue } from '../../src/plugin/request-queue.js';
+import { tokenManager } from '../../src/plugin/token-manager.js';
+import type { QwenCredentials } from '../../src/types.js';
 
 // ============================================
 // Logging Utilities

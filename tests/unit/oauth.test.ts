@@ -8,41 +8,42 @@ import {
   generatePKCE,
   objectToUrlEncoded,
   tokenResponseToCredentials,
-} from '../src/qwen/oauth.js';
-import type { TokenResponse } from '../src/qwen/oauth.js';
+} from '../../src/qwen/oauth.js';
+import type { TokenResponse } from '../../src/qwen/oauth.js';
 
 describe('PKCE Generation', () => {
-  it('should generate code verifier with correct length (43-128 chars)', () => {
-    const { codeVerifier } = generatePKCE();
-    expect(codeVerifier.length).toBeGreaterThanOrEqual(43);
-    expect(codeVerifier.length).toBeLessThanOrEqual(128);
+  it('should generate PKCE with verifier and challenge', () => {
+    const pkce = generatePKCE();
+    expect(pkce.verifier).toBeDefined();
+    expect(pkce.challenge).toBeDefined();
+    expect(pkce.verifier.length).toBeGreaterThanOrEqual(43);
+    expect(pkce.verifier.length).toBeLessThanOrEqual(128);
   });
 
-  it('should generate code verifier with base64url characters only', () => {
-    const { codeVerifier } = generatePKCE();
-    expect(codeVerifier).toMatch(/^[a-zA-Z0-9_-]+$/);
-  });
-
-  it('should generate code challenge from verifier', () => {
-    const { codeVerifier, codeChallenge } = generatePKCE();
-    
-    // Verify code challenge is base64url encoded SHA256
-    const hash = createHash('sha256')
-      .update(codeVerifier)
-      .digest('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '');
-    
-    expect(codeChallenge).toBe(hash);
+  it('should generate verifier with base64url characters only', () => {
+    const { verifier } = generatePKCE();
+    expect(verifier).toMatch(/^[a-zA-Z0-9_-]+$/);
   });
 
   it('should generate different PKCE pairs on each call', () => {
     const pkce1 = generatePKCE();
     const pkce2 = generatePKCE();
+    expect(pkce1.verifier).not.toBe(pkce2.verifier);
+    expect(pkce1.challenge).not.toBe(pkce2.challenge);
+  });
+
+  it('should generate code challenge from verifier', () => {
+    const { verifier, challenge } = generatePKCE();
+
+    // Verify code challenge is base64url encoded SHA256
+    const hash = createHash('sha256')
+      .update(verifier)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
     
-    expect(pkce1.codeVerifier).not.toBe(pkce2.codeVerifier);
-    expect(pkce1.codeChallenge).not.toBe(pkce2.codeChallenge);
+    expect(challenge).toBe(hash);
   });
 });
 
@@ -124,17 +125,17 @@ describe('tokenResponseToCredentials', () => {
 
 describe('OAuth Constants', () => {
   it('should have correct grant type', () => {
-    const { QWEN_OAUTH_CONFIG } = require('../src/constants.js');
+    const { QWEN_OAUTH_CONFIG } = require('../../src/constants.js');
     expect(QWEN_OAUTH_CONFIG.grantType).toBe('urn:ietf:params:oauth:grant-type:device_code');
   });
 
   it('should have scope including model.completion', () => {
-    const { QWEN_OAUTH_CONFIG } = require('../src/constants.js');
+    const { QWEN_OAUTH_CONFIG } = require('../../src/constants.js');
     expect(QWEN_OAUTH_CONFIG.scope).toContain('model.completion');
   });
 
   it('should have non-empty client_id', () => {
-    const { QWEN_OAUTH_CONFIG } = require('../src/constants.js');
+    const { QWEN_OAUTH_CONFIG } = require('../../src/constants.js');
     expect(QWEN_OAUTH_CONFIG.clientId).toBeTruthy();
     expect(QWEN_OAUTH_CONFIG.clientId.length).toBeGreaterThan(0);
   });

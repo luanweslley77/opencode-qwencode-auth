@@ -61,7 +61,7 @@ export function generatePKCE(): { verifier: string; challenge: string } {
 /**
  * Convert object to URL-encoded form data
  */
-function objectToUrlEncoded(data: Record<string, string>): string {
+export function objectToUrlEncoded(data: Record<string, string>): string {
   return Object.keys(data)
     .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
     .join('&');
@@ -143,39 +143,40 @@ export async function pollDeviceToken(
       body: objectToUrlEncoded(bodyData),
     });
 
-  if (!response.ok) {
-    const responseText = await response.text();
+    if (!response.ok) {
+      const responseText = await response.text();
 
-    // Try to parse error response
-    try {
-      const errorData = JSON.parse(responseText) as { error?: string; error_description?: string };
+      // Try to parse error response
+      try {
+        const errorData = JSON.parse(responseText) as { error?: string; error_description?: string };
 
-      // RFC 8628: authorization_pending means user hasn't authorized yet
-      if (response.status === 400 && errorData.error === 'authorization_pending') {
-        return null; // Still pending
-      }
+        // RFC 8628: authorization_pending means user hasn't authorized yet
+        if (response.status === 400 && errorData.error === 'authorization_pending') {
+          return null; // Still pending
+        }
 
-      // RFC 8628: slow_down means we should increase poll interval
-      if (response.status === 429 && errorData.error === 'slow_down') {
-        throw new SlowDownError();
-      }
+        // RFC 8628: slow_down means we should increase poll interval
+        if (response.status === 429 && errorData.error === 'slow_down') {
+          throw new SlowDownError();
+        }
 
-      throw new Error(
-        `Token poll failed: ${errorData.error || 'Unknown error'} - ${errorData.error_description || responseText}`
-      );
-    } catch (parseError) {
-      if (parseError instanceof SyntaxError) {
         throw new Error(
-          `Token poll failed: ${response.status} ${response.statusText}. Response: ${responseText}`
+          `Token poll failed: ${errorData.error || 'Unknown error'} - ${errorData.error_description || responseText}`
         );
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          throw new Error(
+            `Token poll failed: ${response.status} ${response.statusText}. Response: ${responseText}`
+          );
+        }
+        throw parseError;
       }
-      throw parseError;
     }
+
+    return (await response.json()) as TokenResponse;
   } finally {
     clearTimeout(timeoutId);
   }
-
-  return (await response.json()) as TokenResponse;
 }
 
 /**

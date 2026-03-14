@@ -392,5 +392,6 @@ class TokenManager {
   }
 }
 
+export { TokenManager };
 // Singleton instance
 export const tokenManager = new TokenManager();

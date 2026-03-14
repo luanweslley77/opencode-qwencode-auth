@@ -11,7 +11,7 @@ import {
   TokenManagerError,
   TokenError,
   classifyError,
-} from '../src/errors.js';
+} from '../../src/errors.js';
 
 describe('QwenAuthError', () => {
   it('should create token_expired error with correct message', () => {
