@@ -9,7 +9,7 @@ import { randomBytes, createHash, randomUUID } from 'node:crypto';
 
 import { QWEN_OAUTH_CONFIG } from '../constants.js';
 import type { QwenCredentials } from '../types.js';
-import { QwenAuthError, logTechnicalDetail } from '../errors.js';
+import { QwenAuthError, CredentialsClearRequiredError, logTechnicalDetail } from '../errors.js';
 import { retryWithBackoff, getErrorStatus } from '../utils/retry.js';
 
 /**
@@ -61,7 +61,7 @@ export function generatePKCE(): { verifier: string; challenge: string } {
 /**
  * Convert object to URL-encoded form data
  */
-function objectToUrlEncoded(data: Record<string, string>): string {
+export function objectToUrlEncoded(data: Record<string, string>): string {
   return Object.keys(data)
     .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
     .join('&');
@@ -81,15 +81,20 @@ export async function requestDeviceAuthorization(
     code_challenge_method: 'S256',
   };
 
-  const response = await fetch(QWEN_OAUTH_CONFIG.deviceCodeEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-      'x-request-id': randomUUID(),
-    },
-    body: objectToUrlEncoded(bodyData),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+  try {
+    const response = await fetch(QWEN_OAUTH_CONFIG.deviceCodeEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+        'x-request-id': randomUUID(),
+      },
+      signal: controller.signal,
+      body: objectToUrlEncoded(bodyData),
+    });
 
   if (!response.ok) {
     const errorData = await response.text();
@@ -104,6 +109,9 @@ export async function requestDeviceAuthorization(
   }
 
   return result;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -121,46 +129,58 @@ export async function pollDeviceToken(
     code_verifier: codeVerifier,
   };
 
-  const response = await fetch(QWEN_OAUTH_CONFIG.tokenEndpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: objectToUrlEncoded(bodyData),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-  if (!response.ok) {
-    const responseText = await response.text();
+  try {
+    const response = await fetch(QWEN_OAUTH_CONFIG.tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+      body: objectToUrlEncoded(bodyData),
+    });
 
-    // Try to parse error response
-    try {
-      const errorData = JSON.parse(responseText) as { error?: string; error_description?: string };
+    if (!response.ok) {
+      const responseText = await response.text();
 
-      // RFC 8628: authorization_pending means user hasn't authorized yet
-      if (response.status === 400 && errorData.error === 'authorization_pending') {
-        return null; // Still pending
-      }
+      // Try to parse error response
+      try {
+        const errorData = JSON.parse(responseText) as { error?: string; error_description?: string };
 
-      // RFC 8628: slow_down means we should increase poll interval
-      if (response.status === 429 && errorData.error === 'slow_down') {
-        throw new SlowDownError();
-      }
+        // RFC 8628: authorization_pending means user hasn't authorized yet
+        if (response.status === 400 && errorData.error === 'authorization_pending') {
+          return null; // Still pending
+        }
 
-      throw new Error(
-        `Token poll failed: ${errorData.error || 'Unknown error'} - ${errorData.error_description || responseText}`
-      );
-    } catch (parseError) {
-      if (parseError instanceof SyntaxError) {
-        throw new Error(
-          `Token poll failed: ${response.status} ${response.statusText}. Response: ${responseText}`
+        // RFC 8628: slow_down means we should increase poll interval
+        if (response.status === 429 && errorData.error === 'slow_down') {
+          throw new SlowDownError();
+        }
+
+        const error = new Error(
+          `Token poll failed: ${errorData.error || 'Unknown error'} - ${errorData.error_description || responseText}`
         );
+        (error as Error & { status?: number }).status = response.status;
+        throw error;
+      } catch (parseError) {
+        if (parseError instanceof SyntaxError) {
+          const error = new Error(
+            `Token poll failed: ${response.status} ${response.statusText}. Response: ${responseText}`
+          );
+          (error as Error & { status?: number }).status = response.status;
+          throw error;
+        }
+        throw parseError;
       }
-      throw parseError;
     }
-  }
 
-  return (await response.json()) as TokenResponse;
+    return (await response.json()) as TokenResponse;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -190,28 +210,39 @@ export async function refreshAccessToken(refreshToken: string): Promise<QwenCred
 
   return retryWithBackoff(
     async () => {
-      const response = await fetch(QWEN_OAUTH_CONFIG.tokenEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'application/json',
-        },
-        body: objectToUrlEncoded(bodyData),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      try {
+        const response = await fetch(QWEN_OAUTH_CONFIG.tokenEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+          },
+          signal: controller.signal,
+          body: objectToUrlEncoded(bodyData),
+        });
 
       if (!response.ok) {
         const errorText = await response.text();
         logTechnicalDetail(`Token refresh HTTP ${response.status}: ${errorText}`);
         
         // Don't retry on invalid_grant (refresh token expired/revoked)
+        // Signal that credentials need to be cleared
         if (errorText.includes('invalid_grant')) {
-          throw new QwenAuthError('invalid_grant', 'Refresh token expired or revoked');
+          throw new CredentialsClearRequiredError('Refresh token expired or revoked');
         }
         
         throw new QwenAuthError('refresh_failed', `HTTP ${response.status}: ${errorText}`);
       }
 
       const data = await response.json() as TokenResponse;
+
+      // Validate required fields
+      if (!data.access_token) {
+        throw new QwenAuthError('refresh_failed', 'No access token in refresh response');
+      }
 
       return {
         accessToken: data.access_token,
@@ -221,6 +252,9 @@ export async function refreshAccessToken(refreshToken: string): Promise<QwenCred
         expiryDate: Date.now() + data.expires_in * 1000,
         scope: data.scope,
       };
+      } finally {
+        clearTimeout(timeoutId);
+      }
     },
     {
       maxAttempts: 5,
@@ -287,6 +321,8 @@ export async function performDeviceAuthFlow(
       // Check if we should slow down
       if (error instanceof SlowDownError) {
         interval = Math.min(interval * 1.5, 10000); // Increase interval, max 10s
+      } else if ((error as Error & { status?: number }).status === 401) {
+        throw new Error('Device code expired or invalid. Please restart authentication.');
       } else {
         throw error;
       }

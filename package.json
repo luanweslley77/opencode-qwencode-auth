@@ -7,7 +7,12 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node --format esm && bun build ./src/cli.ts --outdir ./dist --target node --format esm",
     "dev": "bun run --watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:integration": "bun run tests/integration/debug.ts full",
+    "test:race": "bun run tests/integration/race-condition.ts",
+    "test:robust": "bun run tests/robust/runner.ts"
   },
   "keywords": [
     "opencode",
@@ -39,7 +44,8 @@
     "@opencode-ai/plugin": "^1.1.48",
     "@types/node": "^22.0.0",
     "bun-types": "^1.1.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^1.0.0"
   },
   "files": [
     "index.ts",

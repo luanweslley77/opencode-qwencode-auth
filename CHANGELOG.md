@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed rate limiting issue (#4)** - Added official Qwen Code headers to prevent aggressive rate limiting
   - Headers include `X-DashScope-CacheControl`, `X-DashScope-AuthType`, `X-DashScope-UserAgent`
   - Requests now recognized as legitimate Qwen Code client
-  - Full 2,000 requests/day quota now available
+  - Full 1,000 requests/day quota now available (OAuth free tier)
 
 ### 🔧 Production Hardening
 

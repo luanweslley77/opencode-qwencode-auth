@@ -17,6 +17,7 @@ import type { QwenCredentials } from '../types.js';
 import { createDebugLogger } from '../utils/debug-logger.js';
 import { FileLock } from '../utils/file-lock.js';
 import { watch } from 'node:fs';
+import { CredentialsClearRequiredError } from '../errors.js';
 
 const debugLogger = createDebugLogger('TOKEN_MANAGER');
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000; // 30 seconds
@@ -245,11 +246,18 @@ class TokenManager {
       return refreshed;
     } catch (error) {
       const elapsed = Date.now() - startTime;
+      
+      // Handle credentials clear required error (invalid_grant)
+      if (error instanceof CredentialsClearRequiredError) {
+        debugLogger.warn('Credentials clear required - clearing memory cache');
+        this.clearCache();
+        throw error;
+      }
+      
       debugLogger.error('Token refresh failed', {
         error: error instanceof Error ? error.message : String(error),
         elapsed,
         hasRefreshToken: !!current?.refreshToken,
-        refreshTokenPreview: current?.refreshToken ? current.refreshToken.substring(0, 10) + '...' : 'N/A',
         stack: error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : undefined
       });
       throw error; // Re-throw so caller knows it failed
@@ -384,5 +392,6 @@ class TokenManager {
   }
 }
 
+export { TokenManager };
 // Singleton instance
 export const tokenManager = new TokenManager();

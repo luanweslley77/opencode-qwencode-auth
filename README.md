@@ -8,14 +8,15 @@
   <img src="assets/screenshot.png" alt="OpenCode with Qwen Code" width="800">
 </p>
 
-**Authenticate OpenCode CLI with your qwen.ai account.** This plugin enables you to use the `coder-model` with **2,000 free requests per day** - no API key or credit card required!
+**Authenticate OpenCode CLI with your qwen.ai account.** This plugin enables you to use the `coder-model` with **1,000 free requests per day** - no API key or credit card required!
 
 [🇧🇷 Leia em Português](./README.pt-BR.md) | [📜 Changelog](./CHANGELOG.md)
 
 ## ✨ Features
 
 - 🔐 **OAuth Device Flow** - Secure browser-based authentication (RFC 8628)
-- 🆓 **2,000 req/day free** - Generous free tier for personal use
+- 🆓 **1,000 req/day free** - Free quota reset daily at midnight UTC
+- ⚡ **60 req/min** - Rate limit of 60 requests per minute
 - 🧠 **1M context window** - Massive context support for large projects
 - 🔄 **Auto-refresh** - Tokens renewed automatically before expiration
 - ⏱️ **Reliability** - Built-in request throttling and automatic retry for transient errors
@@ -42,6 +43,14 @@ Edit `~/.config/opencode/opencode.json`:
   "plugin": ["opencode-qwencode-auth"]
 }
 ```
+
+## ⚠️ Limits & Quotas
+
+- **Rate Limit:** 60 requests per minute
+- **Daily Quota:** 1,000 requests per day (reset at midnight UTC)
+- **Web Search:** 200 requests/minute, 1,000/day (separate quota)
+
+> **Note:** These limits are set by the Qwen OAuth API and may change. For professional use with higher quotas, consider using a [DashScope API Key](https://dashscope.aliyun.com).
 
 ## 🔑 Usage
 
@@ -71,7 +80,9 @@ Select **"Qwen Code (qwen.ai OAuth)"**.
 
 | Model | Context | Max Output | Features |
 |-------|---------|------------|----------|
-| `coder-model` | 1M tokens | 64K tokens | Official alias (Auto-routes to Qwen 3.5 Plus - Hybrid & Vision) |
+| `coder-model` | 1M tokens | Up to 64K tokens¹ | Official alias (Auto-routes to Qwen 3.5 Plus - Hybrid & Vision) |
+
+> ¹ Actual max output may vary depending on the specific model `coder-model` routes to.
 
 > **Note:** This plugin aligns with the official `qwen-code` client. The `coder-model` alias automatically routes to the best available Qwen 3.5 Plus model with hybrid reasoning and vision capabilities.
 
@@ -96,9 +107,11 @@ The plugin usually handles refresh automatically. If you see this error immediat
 
 ### Rate limit exceeded (429 errors)
 
-If you hit the 2,000 requests/day limit:
-- Wait until midnight UTC for the quota to reset.
-- Consider using a [DashScope API Key](https://dashscope.aliyun.com) for professional use.
+If you hit the 60 req/min or 1,000 req/day limits:
+- **Rate limit (60/min):** Wait a few minutes before trying again
+- **Daily quota (1,000/day):** Wait until midnight UTC for the quota to reset
+- **Web Search (200/min, 1,000/day):** Separate quota for web search tool
+- Consider using a [DashScope API Key](https://dashscope.aliyun.com) for professional use with higher quotas
 
 ### Enable Debug Logs
 

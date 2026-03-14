@@ -46,7 +46,10 @@ function openBrowser(url: string): void {
     const child = spawn(command, args, { stdio: 'ignore', detached: true });
     child.unref?.();
   } catch {
-    // Ignore errors
+    // Fallback: show URL in stderr
+    console.error('\n[Qwen Auth] Unable to open browser automatically.');
+    console.error('Please open this URL manually to authenticate:\n');
+    console.error(`  ${url}\n`);
   }
 }
 

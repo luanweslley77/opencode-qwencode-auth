@@ -8,14 +8,15 @@
   <img src="assets/screenshot.png" alt="OpenCode com Qwen Code" width="800">
 </p>
 
-**Autentique o OpenCode CLI com sua conta qwen.ai.** Este plugin permite usar o modelo `coder-model` com **2.000 requisições gratuitas por dia** - sem API key ou cartão de crédito!
+**Autentique o OpenCode CLI com sua conta qwen.ai.** Este plugin permite usar o modelo `coder-model` com **1.000 requisições gratuitas por dia** - sem API key ou cartão de crédito!
 
 [🇺🇸 Read in English](./README.md) | [📜 Changelog](./CHANGELOG.md)
 
 ## ✨ Funcionalidades
 
 - 🔐 **OAuth Device Flow** - Autenticação segura via navegador (RFC 8628)
-- 🆓 **2.000 req/dia grátis** - Plano gratuito generoso para uso pessoal
+- 🆓 **1.000 req/dia grátis** - Cota gratuita renovada diariamente à meia-noite UTC
+- ⚡ **60 req/min** - Rate limit de 60 requisições por minuto
 - 🧠 **1M de contexto** - Suporte a contextos massivos para grandes projetos
 - 🔄 **Auto-refresh** - Tokens renovados automaticamente antes de expirarem
 - ⏱️ **Confiabilidade** - Throttling de requisições e retry automático para erros temporários
@@ -42,6 +43,14 @@ Edite `~/.config/opencode/opencode.json`:
   "plugin": ["opencode-qwencode-auth"]
 }
 ```
+
+## ⚠️ Limites e Quotas
+
+- **Rate Limit:** 60 requisições por minuto
+- **Cota Diária:** 1.000 requisições por dia (reset à meia-noite UTC)
+- **Web Search:** 200 requisições por minuto, 1.000 por dia (quota separada)
+
+> **Nota:** Estes limites são definidos pela API Qwen OAuth e podem mudar. Para uso profissional com quotas maiores, considere usar uma [API Key do DashScope](https://dashscope.aliyun.com).
 
 ## 🔑 Uso
 
@@ -71,7 +80,9 @@ Selecione **"Qwen Code (qwen.ai OAuth)"**.
 
 | Modelo | Contexto | Max Output | Recursos |
 |--------|----------|------------|----------|
-| `coder-model` | 1M tokens | 64K tokens | Alias oficial (Auto-rotas para Qwen 3.5 Plus - Híbrido & Visão) |
+| `coder-model` | 1M tokens | Até 64K tokens¹ | Alias oficial (Auto-rotas para Qwen 3.5 Plus - Híbrido & Visão) |
+
+> ¹ O output máximo real pode variar dependendo do modelo específico para o qual `coder-model` é rotacionado.
 
 > **Nota:** Este plugin está alinhado com o cliente oficial `qwen-code`. O alias `coder-model` rotaciona automaticamente para o melhor modelo Qwen 3.5 Plus disponível com raciocínio híbrido e capacidades de visão.
 
@@ -96,9 +107,11 @@ O plugin geralmente gerencia a renovação automaticamente. Se você vir este er
 
 ### Limite de requisições excedido (erros 429)
 
-Se você atingir o limite de 2.000 requisições/dia:
-- Aguarde até a meia-noite UTC para o reset da cota.
-- Considere usar uma [API Key do DashScope](https://dashscope.aliyun.com) para uso profissional.
+Se você atingir o limite de 60 req/min ou 1.000 req/dia:
+- **Rate limit (60/min):** Aguarde alguns minutos antes de tentar novamente
+- **Cota diária (1.000/dia):** Aguarde até a meia-noite UTC para o reset da cota
+- **Web Search (200/min, 1.000/dia):** Quota separada para ferramenta de busca web
+- Considere usar uma [API Key do DashScope](https://dashscope.aliyun.com) para uso profissional com quotas maiores
 
 ### Habilite Logs de Debug
 

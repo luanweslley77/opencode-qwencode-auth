@@ -14,8 +14,13 @@ import { QWEN_API_CONFIG } from '../constants.js';
 
 /**
  * Get the path to the credentials file
+ * Supports test override via QWEN_TEST_CREDS_PATH environment variable
  */
 export function getCredentialsPath(): string {
+  // Check for test override (prevents tests from modifying user credentials)
+  if (process.env.QWEN_TEST_CREDS_PATH) {
+    return process.env.QWEN_TEST_CREDS_PATH;
+  }
   const homeDir = homedir();
   return join(homeDir, '.qwen', 'oauth_creds.json');
 }
