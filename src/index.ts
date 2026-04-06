@@ -25,6 +25,7 @@ import { retryWithBackoff, getErrorStatus } from './utils/retry.js';
 import { RequestQueue } from './plugin/request-queue.js';
 import { tokenManager } from './plugin/token-manager.js';
 import { createDebugLogger } from './utils/debug-logger.js';
+import { TokenManagerError, TokenError, QwenApiError, CredentialsClearRequiredError } from './errors.js';
 
 const debugLogger = createDebugLogger('PLUGIN');
 
@@ -83,13 +84,27 @@ export const QwenAuthPlugin = async (input: any) => {
           debugLogger.info('No credentials found, polling for OAuth completion...');
           for (let i = 0; i < 6; i++) {
             await new Promise(resolve => setTimeout(resolve, 500));
-            credentials = await tokenManager.getValidCredentials();
-            if (credentials?.accessToken) {
-              debugLogger.info('OAuth completed during loader polling', {
+            try {
+              credentials = await tokenManager.getValidCredentials();
+              if (credentials?.accessToken) {
+                debugLogger.info('OAuth completed during loader polling', {
+                  attempt: i + 1,
+                  elapsed: (i + 1) * 500
+                });
+                break;
+              }
+            } catch (error) {
+              // During OAuth polling, "no credentials yet" is expected — keep polling
+              // But CredentialsClearRequiredError means something is seriously wrong
+              if (error instanceof CredentialsClearRequiredError) {
+                debugLogger.warn('Credentials clear required during polling, stopping');
+                break;
+              }
+              debugLogger.debug('Polling: no credentials yet (expected during OAuth)', {
                 attempt: i + 1,
-                elapsed: (i + 1) * 500
+                error: error instanceof Error ? error.message : 'unknown'
               });
-              break;
+              // Continue polling
             }
           }
         }
@@ -109,10 +124,27 @@ export const QwenAuthPlugin = async (input: any) => {
 
               const executeRequest = async (): Promise<Response> => {
                 // Get latest token (possibly refreshed by concurrent request)
-                const currentCreds = await tokenManager.getValidCredentials();
-                const token = currentCreds?.accessToken;
+                let currentCreds: QwenCredentials;
+                try {
+                  currentCreds = await tokenManager.getValidCredentials();
+                } catch (error) {
+                  if (error instanceof CredentialsClearRequiredError) {
+                    throw new QwenApiError(401, 'Credentials revoked — re-authentication required');
+                  }
+                  if (error instanceof TokenManagerError) {
+                    if (error.type === TokenError.NO_REFRESH_TOKEN) {
+                      throw new QwenApiError(401, 'No refresh token — re-authentication required');
+                    }
+                    if (error.type === TokenError.REFRESH_FAILED) {
+                      throw new QwenApiError(401, `Token refresh failed: ${error.message}`);
+                    }
+                  }
+                  throw new QwenApiError(401, `Authentication failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+                }
                 
-                if (!token) throw new Error('No access token available');
+                const token = currentCreds.accessToken;
+                
+                if (!token) throw new QwenApiError(401, 'No access token available');
 
                 // Prepare merged headers
                 const mergedHeaders: Record<string, string> = {
@@ -152,12 +184,37 @@ export const QwenAuthPlugin = async (input: any) => {
                   authRetryCount++;
                   debugLogger.warn('401 detected, forcing token refresh...');
                   
-                  const refreshed = await tokenManager.getValidCredentials(true);
-                  
-                  if (refreshed?.accessToken) {
-                    debugLogger.info('Token refreshed, retrying request');
-                    return executeRequest();
+                  try {
+                    const refreshed = await tokenManager.getValidCredentials(true);
+                    
+                    if (refreshed.accessToken) {
+                      debugLogger.info('Token refreshed successfully, retrying request');
+                      return executeRequest();
+                    }
+                  } catch (error) {
+                    debugLogger.error('401 recovery: token refresh failed', error);
+                    
+                    if (error instanceof CredentialsClearRequiredError) {
+                      const err = new QwenApiError(401, '[Qwen] Credentials revoked. Run "opencode auth login" to re-authenticate.');
+                      (err as any).shouldNotRetry = true;
+                      throw err;
+                    }
+                    
+                    if (error instanceof TokenManagerError && error.type === TokenError.NO_REFRESH_TOKEN) {
+                      const err = new QwenApiError(401, '[Qwen] No refresh token. Run "opencode auth login" to re-authenticate.');
+                      (err as any).shouldNotRetry = true;
+                      throw err;
+                    }
+                    
+                    // Network or other transient error — surface as server error
+                    const err = new QwenApiError(503, `[Qwen] Token refresh failed during recovery. Try again or run "opencode auth login".`);
+                    throw err;
                   }
+                  
+                  // If we reach here, refresh returned successfully but no access token (shouldn't happen)
+                  const err = new QwenApiError(401, '[Qwen] Token refresh succeeded but no access token. Run "opencode auth login" to re-authenticate.');
+                  (err as any).shouldNotRetry = true;
+                  throw err;
                 }
 
                 // Error handling for retryWithBackoff

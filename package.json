@@ -12,7 +12,7 @@
     "test:watch": "bun test --watch",
     "test:integration": "bun run tests/integration/debug.ts full",
     "test:race": "bun run tests/integration/race-condition.ts",
-    "test:robust": "bun run tests/robust/runner.ts"
+    "test:robust": "bun run tests/robust/runner.ts && bun run tests/integration/race-condition.ts"
   },
   "keywords": [
     "opencode",

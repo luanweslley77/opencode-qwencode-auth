@@ -17,7 +17,7 @@ import type { QwenCredentials } from '../types.js';
 import { createDebugLogger } from '../utils/debug-logger.js';
 import { FileLock } from '../utils/file-lock.js';
 import { watch } from 'node:fs';
-import { CredentialsClearRequiredError } from '../errors.js';
+import { CredentialsClearRequiredError, TokenManagerError, TokenError } from '../errors.js';
 
 const debugLogger = createDebugLogger('TOKEN_MANAGER');
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000; // 30 seconds
@@ -33,7 +33,7 @@ class TokenManager {
     credentials: null,
     lastCheck: 0,
   };
-  private refreshPromise: Promise<QwenCredentials | null> | null = null;
+  private refreshPromise: Promise<QwenCredentials> | null = null;
   private lastFileCheck = 0;
   private fileWatcherInitialized = false;
 
@@ -84,9 +84,11 @@ class TokenManager {
    * Get valid credentials, refreshing if necessary
    * 
    * @param forceRefresh - If true, refresh even if current token is valid
-   * @returns Valid credentials or null if unavailable
+   * @returns Valid credentials
+   * @throws TokenManagerError if unable to obtain valid credentials
+   * @throws CredentialsClearRequiredError if refresh token is revoked/expired
    */
-  async getValidCredentials(forceRefresh = false): Promise<QwenCredentials | null> {
+  async getValidCredentials(forceRefresh = false): Promise<QwenCredentials> {
     const startTime = Date.now();
     debugLogger.info('getValidCredentials called', { forceRefresh });
 
@@ -164,7 +166,30 @@ class TokenManager {
       }
     } catch (error) {
       debugLogger.error('Failed to get valid credentials', error);
-      return null;
+      
+      // Re-throw known error types as-is
+      if (error instanceof CredentialsClearRequiredError) {
+        throw error;
+      }
+      
+      if (error instanceof TokenManagerError) {
+        throw error;
+      }
+      
+      // Wrap unknown errors as TokenManagerError
+      if (error instanceof Error) {
+        throw new TokenManagerError(
+          TokenError.REFRESH_FAILED,
+          `Failed to get valid credentials: ${error.message}`,
+          error.stack
+        );
+      }
+      
+      throw new TokenManagerError(
+        TokenError.REFRESH_FAILED,
+        'Failed to get valid credentials: unknown error',
+        String(error)
+      );
     }
   }
 
@@ -211,7 +236,7 @@ class TokenManager {
   /**
    * Perform the actual token refresh
    */
-  private async performTokenRefresh(current: QwenCredentials | null): Promise<QwenCredentials | null> {
+  private async performTokenRefresh(current: QwenCredentials | null): Promise<QwenCredentials> {
     debugLogger.info('performTokenRefresh called', {
       hasCurrent: !!current,
       hasRefreshToken: !!current?.refreshToken
@@ -219,12 +244,16 @@ class TokenManager {
 
     if (!current?.refreshToken) {
       debugLogger.warn('Cannot refresh: No refresh token available');
-      return null;
+      throw new TokenManagerError(
+        TokenError.NO_REFRESH_TOKEN,
+        'No refresh token available — re-authentication required'
+      );
     }
+
+    const startTime = Date.now();
 
     try {
       debugLogger.info('Calling refreshAccessToken API...');
-      const startTime = Date.now();
       const refreshed = await refreshAccessToken(current.refreshToken);
       const elapsed = Date.now() - startTime;
       
@@ -267,7 +296,7 @@ class TokenManager {
   /**
    * Perform token refresh with file locking (multi-process safe)
    */
-  private async performTokenRefreshWithLock(current: QwenCredentials | null): Promise<QwenCredentials | null> {
+  private async performTokenRefreshWithLock(current: QwenCredentials | null): Promise<QwenCredentials> {
     const credPath = getCredentialsPath();
     const lock = new FileLock(credPath);
 
