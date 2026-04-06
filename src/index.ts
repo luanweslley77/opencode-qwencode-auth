@@ -96,7 +96,8 @@ export const QwenAuthPlugin = async (input: any) => {
             } catch (error) {
               // During OAuth polling, "no credentials yet" is expected — keep polling
               // But CredentialsClearRequiredError means something is seriously wrong
-              if (error instanceof CredentialsClearRequiredError) {
+              const pollErrorName = (error as Error).name;
+              if (pollErrorName === 'CredentialsClearRequiredError' || (error as any).kind === 'credentials_clear_required') {
                 debugLogger.warn('Credentials clear required during polling, stopping');
                 break;
               }
@@ -128,15 +129,16 @@ export const QwenAuthPlugin = async (input: any) => {
                 try {
                   currentCreds = await tokenManager.getValidCredentials();
                 } catch (error) {
-                  if (error instanceof CredentialsClearRequiredError) {
+                  const credErrorName = (error as Error).name;
+                  if (credErrorName === 'CredentialsClearRequiredError' || (error as any).kind === 'credentials_clear_required') {
                     throw new QwenApiError(401, 'Credentials revoked — re-authentication required');
                   }
-                  if (error instanceof TokenManagerError) {
-                    if (error.type === TokenError.NO_REFRESH_TOKEN) {
+                  if (credErrorName === 'TokenManagerError') {
+                    if ((error as any).type === TokenError.NO_REFRESH_TOKEN) {
                       throw new QwenApiError(401, 'No refresh token — re-authentication required');
                     }
-                    if (error.type === TokenError.REFRESH_FAILED) {
-                      throw new QwenApiError(401, `Token refresh failed: ${error.message}`);
+                    if ((error as any).type === TokenError.REFRESH_FAILED) {
+                      throw new QwenApiError(401, `Token refresh failed: ${(error as Error).message}`);
                     }
                   }
                   throw new QwenApiError(401, `Authentication failed: ${error instanceof Error ? error.message : 'unknown error'}`);
@@ -194,27 +196,31 @@ export const QwenAuthPlugin = async (input: any) => {
                   } catch (error) {
                     debugLogger.error('401 recovery: token refresh failed', error);
                     
-                    if (error instanceof CredentialsClearRequiredError) {
+                    // Duck-typing: instanceof fails when bun transpiles from git cache
+                    const errorName = (error as Error).name;
+                    const errorKind = (error as any).kind;
+                    
+                    if (errorName === 'CredentialsClearRequiredError' || errorKind === 'credentials_clear_required') {
                       const err = new QwenApiError(401, '[Qwen] Credentials revoked. Run "opencode auth login" to re-authenticate.');
                       (err as any).shouldNotRetry = true;
                       throw err;
                     }
                     
-                    if (error instanceof TokenManagerError && error.type === TokenError.NO_REFRESH_TOKEN) {
+                    if (errorName === 'TokenManagerError' && (error as any).type === TokenError.NO_REFRESH_TOKEN) {
                       const err = new QwenApiError(401, '[Qwen] No refresh token. Run "opencode auth login" to re-authenticate.');
                       (err as any).shouldNotRetry = true;
                       throw err;
                     }
                     
                     // If refresh API returned 400 with refresh token error, treat as re-auth needed
-                    if (error instanceof QwenAuthError && error.kind === 'refresh_failed') {
+                    if (errorName === 'QwenAuthError' && errorKind === 'refresh_failed') {
                       const err = new QwenApiError(401, '[Qwen] Refresh token is invalid. Run "opencode auth login" to re-authenticate.');
                       (err as any).shouldNotRetry = true;
                       throw err;
                     }
                     
-                    // Network or other transient error — surface as server error
-                    const err = new QwenApiError(503, `[Qwen] Token refresh failed during recovery. Try again or run "opencode auth login".`);
+                    // Network or other transient error — surface as 401 so retryWithBackoff doesn't retry
+                    const err = new QwenApiError(401, `[Qwen] Token refresh failed during recovery. Run "opencode auth login" to re-authenticate.`);
                     throw err;
                   }
                   
