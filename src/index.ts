@@ -25,7 +25,7 @@ import { retryWithBackoff, getErrorStatus } from './utils/retry.js';
 import { RequestQueue } from './plugin/request-queue.js';
 import { tokenManager } from './plugin/token-manager.js';
 import { createDebugLogger } from './utils/debug-logger.js';
-import { TokenManagerError, TokenError, QwenApiError, CredentialsClearRequiredError } from './errors.js';
+import { TokenManagerError, TokenError, QwenApiError, CredentialsClearRequiredError, QwenAuthError } from './errors.js';
 
 const debugLogger = createDebugLogger('PLUGIN');
 
@@ -202,6 +202,13 @@ export const QwenAuthPlugin = async (input: any) => {
                     
                     if (error instanceof TokenManagerError && error.type === TokenError.NO_REFRESH_TOKEN) {
                       const err = new QwenApiError(401, '[Qwen] No refresh token. Run "opencode auth login" to re-authenticate.');
+                      (err as any).shouldNotRetry = true;
+                      throw err;
+                    }
+                    
+                    // If refresh API returned 400 with refresh token error, treat as re-auth needed
+                    if (error instanceof QwenAuthError && error.kind === 'refresh_failed') {
+                      const err = new QwenApiError(401, '[Qwen] Refresh token is invalid. Run "opencode auth login" to re-authenticate.');
                       (err as any).shouldNotRetry = true;
                       throw err;
                     }

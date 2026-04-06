@@ -228,9 +228,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<QwenCred
         const errorText = await response.text();
         logTechnicalDetail(`Token refresh HTTP ${response.status}: ${errorText}`);
         
-        // Don't retry on invalid_grant (refresh token expired/revoked)
+        // Don't retry on invalid_grant, invalid_request with refresh token issues, or explicit invalid refresh token
         // Signal that credentials need to be cleared
-        if (errorText.includes('invalid_grant')) {
+        if (
+          errorText.includes('invalid_grant') ||
+          errorText.includes('Invalid refresh token') ||
+          (errorText.includes('invalid_request') && (errorText.includes('refresh_token') || errorText.includes('client_id')))
+        ) {
           throw new CredentialsClearRequiredError('Refresh token expired or revoked');
         }
         
@@ -261,8 +265,12 @@ export async function refreshAccessToken(refreshToken: string): Promise<QwenCred
       initialDelayMs: 1000,
       maxDelayMs: 15000,
       shouldRetryOnError: (error) => {
-        // Don't retry on invalid_grant errors
-        if (error.message.includes('invalid_grant')) {
+        // Don't retry on invalid_grant or refresh token errors
+        if (
+          error.message.includes('invalid_grant') ||
+          error.message.includes('Invalid refresh token') ||
+          (error.message.includes('invalid_request') && (error.message.includes('refresh_token') || error.message.includes('client_id')))
+        ) {
           return false;
         }
         // Retry on 429 or 5xx errors
