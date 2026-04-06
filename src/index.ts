@@ -120,6 +120,10 @@ export const QwenAuthPlugin = async (input: any) => {
           },
           // Custom fetch with throttling, retry and 401 recovery
           fetch: async (url: string, options: any = {}) => {
+            // Track if recovery was attempted globally (across all enqueued requests)
+            // to prevent repeated refresh attempts with the same invalid token
+            let recoveryAttempted = false;
+
             return requestQueue.enqueue(async () => {
               let authRetryCount = 0;
 
@@ -182,7 +186,8 @@ export const QwenAuthPlugin = async (input: any) => {
                 });
 
                 // Reactive recovery for 401 (token expired mid-session or revoked server-side)
-                if (response.status === 401 && authRetryCount < 1) {
+                if (response.status === 401 && !recoveryAttempted && authRetryCount < 1) {
+                  recoveryAttempted = true;
                   authRetryCount++;
                   debugLogger.warn('401 detected, forcing token refresh...');
                   
