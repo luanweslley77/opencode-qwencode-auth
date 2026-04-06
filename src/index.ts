@@ -68,6 +68,10 @@ export const QwenAuthPlugin = async (input: any) => {
         getAuth: any,
         provider: { models?: Record<string, { cost?: { input: number; output: number } }> },
       ) => {
+        // Track if 401 recovery was attempted — persists across ALL fetch calls
+        // to prevent repeated refresh attempts with the same invalid token
+        let recoveryAttempted = false;
+
         // Zero model costs (free via OAuth)
         if (provider?.models) {
           for (const model of Object.values(provider.models)) {
@@ -120,10 +124,6 @@ export const QwenAuthPlugin = async (input: any) => {
           },
           // Custom fetch with throttling, retry and 401 recovery
           fetch: async (url: string, options: any = {}) => {
-            // Track if recovery was attempted globally (across all enqueued requests)
-            // to prevent repeated refresh attempts with the same invalid token
-            let recoveryAttempted = false;
-
             return requestQueue.enqueue(async () => {
               let authRetryCount = 0;
 
