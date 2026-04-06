@@ -179,13 +179,13 @@ export const QwenAuthPlugin = async (input: any) => {
                   headers: mergedHeaders
                 });
 
-                // Reactive recovery for 401 (token expired mid-session)
+                // Reactive recovery for 401 (token expired mid-session or revoked server-side)
                 if (response.status === 401 && authRetryCount < 1) {
                   authRetryCount++;
                   debugLogger.warn('401 detected, forcing token refresh...');
                   
                   try {
-                    const refreshed = await tokenManager.getValidCredentials(true);
+                    const refreshed = await tokenManager.forceRefreshToken();
                     
                     if (refreshed.accessToken) {
                       debugLogger.info('Token refreshed successfully, retrying request');

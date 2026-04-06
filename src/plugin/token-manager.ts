@@ -150,7 +150,7 @@ class TokenManager {
         }
 
         // Need to perform actual refresh via API (with file locking for multi-process safety)
-        const result = await this.performTokenRefreshWithLock(fromFile);
+        const result = await this.performTokenRefreshWithLock(fromFile, forceRefresh);
         debugLogger.info('Refresh operation completed', {
           success: !!result,
           age: Date.now() - refreshStart
@@ -296,11 +296,11 @@ class TokenManager {
   /**
    * Perform token refresh with file locking (multi-process safe)
    */
-  private async performTokenRefreshWithLock(current: QwenCredentials | null): Promise<QwenCredentials> {
+  private async performTokenRefreshWithLock(current: QwenCredentials | null, forceRefresh = false): Promise<QwenCredentials> {
     const credPath = getCredentialsPath();
     const lock = new FileLock(credPath);
 
-    debugLogger.info('Attempting to acquire file lock', { credPath });
+    debugLogger.info('Attempting to acquire file lock', { credPath, forceRefresh });
     const lockStart = Date.now();
     const lockAcquired = await lock.acquire(5000, 100);
     const lockElapsed = Date.now() - lockStart;
@@ -348,10 +348,12 @@ class TokenManager {
       debugLogger.info('Double-check after lock acquisition', {
         hasFile: !!fromFile,
         fileValid: fromFile ? this.isTokenValid(fromFile) : 'N/A',
-        elapsed: doubleCheckElapsed
+        elapsed: doubleCheckElapsed,
+        forceRefresh
       });
       
-      if (fromFile && this.isTokenValid(fromFile)) {
+      // Skip validity check when forceRefresh is true — server may have revoked the token
+      if (!forceRefresh && fromFile && this.isTokenValid(fromFile)) {
         debugLogger.info('Credentials already refreshed by another process', {
           timeSinceLockStart: doubleCheckElapsed,
           usingFileCredentials: true
@@ -363,7 +365,8 @@ class TokenManager {
       // Perform the actual refresh
       debugLogger.info('Performing refresh in critical section', {
         hasRefreshToken: !!fromFile?.refreshToken,
-        elapsed: doubleCheckElapsed
+        elapsed: doubleCheckElapsed,
+        forceRefresh
       });
       return await this.performTokenRefresh(fromFile);
     } finally {
@@ -418,6 +421,32 @@ class TokenManager {
     });
     this.updateCacheState(credentials);
     saveCredentials(credentials);
+  }
+
+  /**
+   * Force token refresh via API — bypasses isTokenValid() checks
+   * Used when API returns 401 but local token still appears valid
+   * (e.g., token was revoked/invalidated server-side)
+   */
+  async forceRefreshToken(): Promise<QwenCredentials> {
+    debugLogger.info('forceRefreshToken called — bypassing validity checks');
+    
+    // Invalidate cache to ensure we read from file
+    this.invalidateCache();
+    
+    // Load credentials from file to get refresh token
+    const fromFile = loadCredentials();
+    
+    if (!fromFile?.refreshToken) {
+      debugLogger.warn('Cannot force refresh: No refresh token available');
+      throw new TokenManagerError(
+        TokenError.NO_REFRESH_TOKEN,
+        'No refresh token available — re-authentication required'
+      );
+    }
+
+    // Call refresh API with file locking, forcing bypass of validity checks
+    return await this.performTokenRefreshWithLock(fromFile, true);
   }
 }
 
